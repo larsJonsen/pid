@@ -11,10 +11,26 @@ Run independently of the gateway so it can be restarted, killed, and iterated on
 ```bash
 mix deps.get              # install dependencies
 mix compile               # compile
-iex -S mix                # start with interactive shell (preferred during tuning)
 mix test                  # run tests
 mix precommit             # compile --warnings-as-errors, format, credo --strict, test
 ```
+
+Start against the real broker (credentials via env vars — never commit them):
+
+```bash
+MQTT_HOST=192.168.1.182 \
+MQTT_USERNAME=svampekompagniet \
+MQTT_PASSWORD=HgrIGQ6uSPRG \
+iex -S mix
+```
+
+Shut down cleanly from the iex shell:
+
+```
+System.stop()
+```
+
+(Ctrl+C Ctrl+C does the same thing — both trigger a clean OTP shutdown, CubDB flushes, MQTT disconnects.)
 
 ## Architecture
 
@@ -67,6 +83,13 @@ mix run -e 'code = File.read!("lib/path/to/file.ex"); result = Credence.fix(code
 ```
 
 When credo and credence conflict, credence wins.
+
+## Infrastructure
+
+- MQTT broker: `svampe-server.localdomain` / `192.168.1.182`, port 1883
+- MQTT client tool on dev machine: **MQTTX** (mosquitto is not installed)
+- Broker requires authentication — always pass `MQTT_USERNAME` and `MQTT_PASSWORD`
+- `emqtt` does NOT send a `{:connected, _}` callback after connect; subscription is done synchronously inside the `with` block in `handle_info(:connect, ...)`
 
 ## Design notes
 
