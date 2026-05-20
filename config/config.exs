@@ -5,7 +5,9 @@ config :pid, :mqtt,
   port: 1883,
   group: "drejø",
   co2_device: "scd_2",
-  pwm_device: "pwm_1"
+  pwm_device: "pwm_1",
+  username: nil,
+  password: nil
 
 config :pid, :store, data_dir: "priv/pid_state"
 

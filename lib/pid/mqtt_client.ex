@@ -55,19 +55,30 @@ defmodule Pid.MqttClient do
   def handle_info(:connect, state) do
     conf = Application.fetch_env!(:pid, :mqtt)
 
-    opts = [
-      host: conf[:host],
-      port: conf[:port],
-      client_id: "pid_controller",
-      clean_start: false,
-      reconnect: :infinity,
-      reconnect_timeout: 5,
-      keepalive: 60
-    ]
+    opts =
+      [
+        host: conf[:host],
+        port: conf[:port],
+        client_id: "pid_controller",
+        clean_start: false,
+        reconnect: :infinity,
+        reconnect_timeout: 5,
+        keepalive: 60
+      ]
+      |> then(fn o ->
+        if conf[:username],
+          do: o ++ [username: conf[:username], password: conf[:password]],
+          else: o
+      end)
 
     with {:ok, pid} <- :emqtt.start_link(opts),
-         {:ok, _} <- :emqtt.connect(pid) do
-      Logger.info("MqttClient connected to broker")
+         {:ok, _} <- :emqtt.connect(pid),
+         {:ok, _, _} <-
+           :emqtt.subscribe(pid, [{state.topics.metric, @qos}, {state.topics.cmd, @qos}]) do
+      Logger.info(
+        "MqttClient connected, subscribed to #{state.topics.metric} and #{state.topics.cmd}"
+      )
+
       {:noreply, %{state | emqtt: pid}}
     else
       {:error, reason} ->
@@ -78,18 +89,6 @@ defmodule Pid.MqttClient do
         Process.send_after(self(), :connect, @connect_retry)
         {:noreply, state}
     end
-  end
-
-  def handle_info({:connected, _info}, state) do
-    case :emqtt.subscribe(state.emqtt, [{state.topics.metric, @qos}, {state.topics.cmd, @qos}]) do
-      {:ok, _, _} ->
-        Logger.info("MqttClient subscribed to #{state.topics.metric} and #{state.topics.cmd}")
-
-      {:error, reason} ->
-        Logger.warning("MqttClient subscription failed: #{inspect(reason)}")
-    end
-
-    {:noreply, state}
   end
 
   def handle_info({:publish, %{topic: topic, payload: payload}}, state) do
