@@ -32,14 +32,14 @@ defmodule Pid.Co2Controller do
     kp = Store.get(:kp, @default_kp)
     ki = Store.get(:ki, @default_ki)
     setpoint = Store.get(:setpoint, @default_setpoint)
-    output_min = Store.get(:output_min, @default_output_min)
-    output_max = Store.get(:output_max, @default_output_max)
+    output_min = Store.get(:output_min, @default_output_min) * 1.0
+    output_max = Store.get(:output_max, @default_output_max) * 1.0
     last_output = Store.get(:last_output, @default_last_output)
     enabled = Store.get(:enabled, @default_enabled)
     relay_low = Store.get(:relay_low, @default_relay_low)
     relay_high = Store.get(:relay_high, @default_relay_high)
 
-    controller = build_controller(kp, ki, output_min, output_max, last_output)
+    controller = build_controller(kp, ki, last_output)
 
     Logger.info(
       "Co2Controller started — enabled: #{enabled}, setpoint: #{setpoint} ppm, " <>
@@ -51,6 +51,7 @@ defmodule Pid.Co2Controller do
       setpoint: setpoint,
       enabled: enabled,
       last_output: last_output,
+      output_limits: {output_min, output_max},
       relay_low: relay_low,
       relay_high: relay_high,
       autotune: nil,
@@ -170,7 +171,9 @@ defmodule Pid.Co2Controller do
     input = state.setpoint - co2
     {:ok, raw_output, updated_controller} = PidController.output(input, state.controller)
 
-    output = raw_output |> round() |> clamp_to_limits(state.controller.output_limits)
+    output = raw_output |> round() |> clamp_to_limits(state.output_limits)
+
+    controller = antiwindup(raw_output, state.output_limits, updated_controller, state.controller)
 
     case MqttClient.publish_pwm(output) do
       :ok ->
@@ -186,7 +189,7 @@ defmodule Pid.Co2Controller do
 
     new_state = %{
       state
-      | controller: updated_controller,
+      | controller: controller,
         last_output: output,
         cycle_count: cycle_count
     }
@@ -203,14 +206,14 @@ defmodule Pid.Co2Controller do
   end
 
   defp apply_command("set_kp", value, state) when is_number(value) do
-    kp = value
+    kp = value * 1.0
     Store.put(:kp, kp)
     Logger.info("Co2Controller: Kp=#{kp}")
     %{state | controller: PidController.set_kp(state.controller, kp)}
   end
 
   defp apply_command("set_ki", value, state) when is_number(value) do
-    ki = value
+    ki = value * 1.0
 
     controller =
       state.controller |> PidController.set_ki(ki) |> reseed_integral(state.last_output, ki)
@@ -227,23 +230,19 @@ defmodule Pid.Co2Controller do
   end
 
   defp apply_command("set_output_min", value, state) when is_number(value) do
-    new_min = value
-    {_old_min, old_max} = state.controller.output_limits
-    max_val = old_max || @default_output_max
-    controller = PidController.set_output_limits(state.controller, {new_min, max_val})
-    Store.put(:output_min, new_min)
-    Logger.info("Co2Controller: output_min=#{new_min}")
-    %{state | controller: controller}
+    {_old_min, old_max} = state.output_limits
+    new_limits = {value * 1.0, old_max}
+    Store.put(:output_min, value * 1.0)
+    Logger.info("Co2Controller: output_min=#{value}")
+    %{state | output_limits: new_limits}
   end
 
   defp apply_command("set_output_max", value, state) when is_number(value) do
-    new_max = value
-    {old_min, _old_max} = state.controller.output_limits
-    min_val = old_min || @default_output_min
-    controller = PidController.set_output_limits(state.controller, {min_val, new_max})
-    Store.put(:output_max, new_max)
-    Logger.info("Co2Controller: output_max=#{new_max}")
-    %{state | controller: controller}
+    {old_min, _old_max} = state.output_limits
+    new_limits = {old_min, value * 1.0}
+    Store.put(:output_max, value * 1.0)
+    Logger.info("Co2Controller: output_max=#{value}")
+    %{state | output_limits: new_limits}
   end
 
   defp apply_command("enable", 1, state) do
@@ -303,35 +302,32 @@ defmodule Pid.Co2Controller do
 
   defp clamp_to_limits(value, _limits), do: value
 
-  # Build controller with direct action and setpoint=0.
-  # Input to output/2 is (setpoint_ppm - co2): positive when CO2 too high,
-  # driving positive output (more fan).
-  defp build_controller(kp, ki, output_min, output_max, last_output) do
+  # Freeze integral when output is clamped (anti-windup).
+  defp antiwindup(raw_output, {out_min, out_max}, updated, _original)
+       when raw_output >= out_min and raw_output <= out_max,
+       do: updated
+
+  defp antiwindup(_raw_output, _limits, _updated, original), do: original
+
+  # PidController uses setpoint=0; input = setpoint_ppm - co2.
+  # Internally: error = 0 - input = co2 - setpoint_ppm → positive when CO2 high → more fan.
+  # No output_limits in PidController — we clamp externally and do anti-windup ourselves.
+  defp build_controller(kp, ki, last_output) do
     controller =
       PidController.new(
         kp: kp,
         ki: ki,
         kd: 0.0,
-        setpoint: 0.0,
-        output_limits: {output_min, output_max}
+        setpoint: 0.0
       )
 
     reseed_integral(controller, last_output, ki)
   end
 
-  # Seed error_sum so the integral term reproduces last_output on the next step
-  # when error is zero. Only applies when ki > 0 and the seed falls within limits.
+  # Seed error_sum so integral reproduces last_output at zero error.
+  # PidController I term = Ki * (error_sum + error); at error=0: I = Ki * error_sum.
   defp reseed_integral(controller, last_output, ki) when ki > 0.0 do
-    {min_val, max_val} = controller.output_limits
-    lo = min_val || @default_output_min
-    hi = max_val || @default_output_max
-    seed = last_output / ki
-
-    if seed >= lo and seed <= hi do
-      %{controller | error_sum: seed}
-    else
-      controller
-    end
+    %{controller | error_sum: last_output / ki}
   end
 
   defp reseed_integral(controller, _last_output, _ki), do: controller
