@@ -22,8 +22,8 @@ defmodule Pid.AutoTuner do
 
   def new(opts \\ []) do
     %__MODULE__{
-      relay_high: Keyword.get(opts, :relay_high, 800),
-      relay_low: Keyword.get(opts, :relay_low, 100),
+      relay_high: Keyword.get(opts, :relay_high, 409),
+      relay_low: Keyword.get(opts, :relay_low, 307),
       hysteresis: Keyword.get(opts, :hysteresis, 20),
       min_full_cycles: Keyword.get(opts, :min_full_cycles, 3)
     }

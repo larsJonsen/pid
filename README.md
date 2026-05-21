@@ -61,6 +61,8 @@ Send JSON to `cmd/pid/co2`. Multiple keys in one message are applied in order.
 | `set_output_max` | number 0–1023 | Upper PWM clamp |
 | `enable` | `1` | Start the PI loop |
 | `disable` | `1` | Stop the loop — fan holds its last value |
+| `set_relay_low` | integer 0–1023 | Lower relay bound for auto-tuner (default 307 = 30%) |
+| `set_relay_high` | integer 0–1023 | Upper relay bound for auto-tuner (default 409 = 40%) |
 | `start_autotune` | `1` | Start relay auto-tuner (controller must be enabled) |
 | `stop_autotune` | `1` | Cancel auto-tuner without applying results |
 

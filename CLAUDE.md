@@ -60,6 +60,8 @@ Pid.Application
 | `set_output_max` | number 0–1023 | Upper clamp for PWM output |
 | `enable` | 1 | Activate PI loop |
 | `disable` | 1 | Halt loop — fan holds last EEPROM value on pwm_1 |
+| `set_relay_low` | integer 0–1023 | Lower relay bound for auto-tuner (default 307 = 30%) |
+| `set_relay_high` | integer 0–1023 | Upper relay bound for auto-tuner (default 409 = 40%) |
 | `start_autotune` | 1 | Start relay auto-tuner (requires `enable` first); applies Kp/Ki on completion |
 | `stop_autotune` | 1 | Cancel auto-tuner without applying results |
 
@@ -68,6 +70,7 @@ Pid.Application
 Keys stored in `priv/pid_state/`:
 
 - `:kp`, `:ki`, `:setpoint`, `:output_min`, `:output_max` — written on every param change
+- `:relay_low`, `:relay_high` — auto-tuner relay bounds, written on change (defaults 307/409)
 - `:last_output` — written every 10th PI cycle (~10 minutes)
 - `:enabled` — written on every change
 

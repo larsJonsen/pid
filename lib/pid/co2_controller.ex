@@ -16,6 +16,8 @@ defmodule Pid.Co2Controller do
   @default_output_max 1023.0
   @default_last_output 300
   @default_enabled false
+  @default_relay_low 307
+  @default_relay_high 409
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -34,6 +36,8 @@ defmodule Pid.Co2Controller do
     output_max = Store.get(:output_max, @default_output_max)
     last_output = Store.get(:last_output, @default_last_output)
     enabled = Store.get(:enabled, @default_enabled)
+    relay_low = Store.get(:relay_low, @default_relay_low)
+    relay_high = Store.get(:relay_high, @default_relay_high)
 
     controller = build_controller(kp, ki, output_min, output_max, last_output)
 
@@ -47,6 +51,8 @@ defmodule Pid.Co2Controller do
       setpoint: setpoint,
       enabled: enabled,
       last_output: last_output,
+      relay_low: relay_low,
+      relay_high: relay_high,
       autotune: nil,
       watchdog_ref: nil,
       cycle_count: 0,
@@ -252,9 +258,25 @@ defmodule Pid.Co2Controller do
     %{state | enabled: false}
   end
 
+  defp apply_command("set_relay_low", value, state) when is_number(value) do
+    relay_low = round(value)
+    Store.put(:relay_low, relay_low)
+    Logger.info("Co2Controller: relay_low=#{relay_low}")
+    %{state | relay_low: relay_low}
+  end
+
+  defp apply_command("set_relay_high", value, state) when is_number(value) do
+    relay_high = round(value)
+    Store.put(:relay_high, relay_high)
+    Logger.info("Co2Controller: relay_high=#{relay_high}")
+    %{state | relay_high: relay_high}
+  end
+
   defp apply_command("start_autotune", 1, state) do
-    Logger.info("Co2Controller: starting autotune")
-    %{state | autotune: AutoTuner.new()}
+    Logger.info("Co2Controller: starting autotune — relay #{state.relay_low}–#{state.relay_high}")
+
+    tuner = AutoTuner.new(relay_low: state.relay_low, relay_high: state.relay_high)
+    %{state | autotune: tuner}
   end
 
   defp apply_command("stop_autotune", 1, state) do
