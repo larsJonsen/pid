@@ -302,12 +302,18 @@ defmodule Pid.Co2Controller do
 
   defp clamp_to_limits(value, _limits), do: value
 
-  # Freeze integral when output is clamped (anti-windup).
-  defp antiwindup(raw_output, {out_min, out_max}, updated, _original)
-       when raw_output >= out_min and raw_output <= out_max,
-       do: updated
+  # Conditional anti-windup: freeze integral only when clamping would worsen windup.
+  # Allow integral to grow past the low clamp (CO2 high, building toward operating point).
+  # Freeze only when the integral is moving in the saturating direction.
+  defp antiwindup(raw, {out_min, out_max}, updated, original) do
+    clamped_high = raw > out_max
+    clamped_low = raw < out_min
+    integral_grew = updated.error_sum > original.error_sum
 
-  defp antiwindup(_raw_output, _limits, _updated, original), do: original
+    if (clamped_high and integral_grew) or (clamped_low and not integral_grew),
+      do: original,
+      else: updated
+  end
 
   # PidController uses setpoint=0; input = setpoint_ppm - co2.
   # Internally: error = 0 - input = co2 - setpoint_ppm → positive when CO2 high → more fan.
