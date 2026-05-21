@@ -122,7 +122,7 @@ defmodule Pid.Co2Controller do
   end
 
   defp run_autotune_step(co2, tuner, state) do
-    error = state.setpoint - co2
+    error = co2 - state.setpoint
     {output, updated_tuner, result} = AutoTuner.step(error, tuner)
 
     case MqttClient.publish_pwm(output) do
