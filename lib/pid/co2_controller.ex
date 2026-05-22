@@ -39,7 +39,7 @@ defmodule Pid.Co2Controller do
     relay_low = Store.get(:relay_low, @default_relay_low)
     relay_high = Store.get(:relay_high, @default_relay_high)
 
-    controller = build_controller(kp, ki, last_output)
+    controller = build_controller(kp, ki, last_output, {output_min, output_max})
 
     Logger.info(
       "Co2Controller started — enabled: #{enabled}, setpoint: #{setpoint} ppm, " <>
@@ -318,7 +318,7 @@ defmodule Pid.Co2Controller do
   # PidController uses setpoint=0; input = setpoint_ppm - co2.
   # Internally: error = 0 - input = co2 - setpoint_ppm → positive when CO2 high → more fan.
   # No output_limits in PidController — we clamp externally and do anti-windup ourselves.
-  defp build_controller(kp, ki, last_output) do
+  defp build_controller(kp, ki, last_output, {out_min, out_max}) do
     controller =
       PidController.new(
         kp: kp,
@@ -327,14 +327,22 @@ defmodule Pid.Co2Controller do
         setpoint: 0.0
       )
 
-    reseed_integral(controller, last_output, ki)
+    # If last_output is outside the operating range (e.g. stale CubDB value from a
+    # previous misconfigured run), seed from the midpoint so the first PWM is ~350
+    # rather than waiting for the integral to build up from scratch.
+    seed =
+      if last_output >= out_min and last_output <= out_max,
+        do: last_output,
+        else: (out_min + out_max) / 2.0
+
+    reseed_integral(controller, seed, ki)
   end
 
-  # Seed error_sum so integral reproduces last_output at zero error.
+  # Seed error_sum so integral reproduces target_output at zero error.
   # PidController I term = Ki * (error_sum + error); at error=0: I = Ki * error_sum.
-  defp reseed_integral(controller, last_output, ki) when ki > 0.0 do
-    %{controller | error_sum: last_output / ki}
+  defp reseed_integral(controller, target_output, ki) when ki > 0.0 do
+    %{controller | error_sum: target_output / ki}
   end
 
-  defp reseed_integral(controller, _last_output, _ki), do: controller
+  defp reseed_integral(controller, _target_output, _ki), do: controller
 end
